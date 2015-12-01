@@ -1,0 +1,37 @@
+*~
+\#*\#
+.\#*
+*.sw[op]
+*.py[co]
+*.diff
+*.patch
+*.bak
+*.project
+
+.idea/
+.DS_Store
+Thumbs.db
+
+
+.tox
+.coverage
+.coverage-html
+.vagrant
+.venv
+
+tmp
+
+# Frontend
+frontend/dist
+frontend/node_modules
+
+# Config files
+deploy/config.toml
+deploy/supervisor/supervisord.conf
+deploy/supervisor/programs/app.conf
+deploy/nginx/apiapp.conf
+deploy/nginx/webapp.conf
+deploy/nginx/dl.conf
+deploy/nginx/frontend.conf
+deploy/apps/apiapp.py
+deploy/apps/webapp.yaml
