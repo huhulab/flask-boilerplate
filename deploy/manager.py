@@ -9,16 +9,20 @@ import py_compile
 import ConfigParser
 
 import toml
+import crontab
 
 
 # ==============================================================================
-#  Global config
+#  Global default config
 # ==============================================================================
-PWD = os.environ.get('PWD')
+CONFIG = 'deploy/config.toml'
+SUPERVISOR_CONFIG = 'deploy/supervisor/supervisord.conf'
+
 SCRIPT_PATH = os.path.dirname(os.path.abspath(__file__))
-BASE_PATH = SCRIPT_PATH if os.path.realpath(PWD) != os.path.realpath(SCRIPT_PATH) else ''
-DEFAULT_CONFIG_PATH = os.path.join(BASE_PATH, 'deploy/config.toml')
-SUPERVISOR_CONFIG_PATH = os.path.join(BASE_PATH, 'deploy/supervisor/supervisord.conf')
+BASE_PATH = os.path.dirname(SCRIPT_PATH)
+DEFAULT_CONFIG_PATH = os.path.join(BASE_PATH, CONFIG)
+SUPERVISOR_CONFIG_PATH = os.path.join(BASE_PATH, SUPERVISOR_CONFIG)
+
 
 class Renderer(object):
     def __init__(self, tmpl_type, root_path=None):
@@ -42,18 +46,64 @@ class Renderer(object):
 def parse_args():
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers(dest='action')
-    parser_config = subparsers.add_parser('config', help='Config this project')
+    parser_config = subparsers.add_parser('config', help='Generate config files and setup crontab jobs')
     parser_supervisor = subparsers.add_parser('supervisor', help='Start supervisor')
 
     parser_config.add_argument('-l', '--list', action='store_true', help='Just list all target files')
     parser_config.add_argument('-c', '--config', default=DEFAULT_CONFIG_PATH,
                         help='The config file (config.toml)')
     parser_config.add_argument('-d', '--dry', action='store_true', help='Do not write files (dry run)')
+    parser_supervisor.add_argument('-c', '--config', default=SUPERVISOR_CONFIG_PATH,
+                                   help='The config file (supervisord.conf)')
     parser_supervisor.add_argument('-l', '--list', action='store_true', help='Just list all programs')
     args = parser.parse_args()
     print 'Args: {}'.format(args)
     print '-' * 60
     return args
+
+
+def setup_crontab(root_path, config):
+    jobs = config.get('jobs', [])
+    if not jobs:
+        print '>>> There is no crontab jobs!'
+        print '-' * 40
+        return
+    project_name = config['global'].get('project-name', os.path.basename(root_path))
+
+    cron = crontab.CronTab(user=True)
+    for job_args in jobs:
+        name = ':'.join([project_name, job_args['name']])
+        command = job_args.get('command')
+        if not command:
+            executable = job_args['executable']
+            args = job_args['args']
+        else:
+            parts = command.split(' ', 1)
+            executable = parts[0]
+            if len(parts) > 1:
+                args = parts[1]
+            else:
+                args = ''
+        if not job_args.get('is-abspath', False) \
+           and not executable.strip().startswith('/'):
+            executable = os.path.join(root_path, executable)
+        command = ' '.join([executable, args])
+        job_iter = cron.find_comment(name)
+        try:
+            job = job_iter.next()
+            job.command = command
+        except StopIteration:
+            job = cron.new(command=command, comment=name)
+        valid = job.setall(job_args['restriction'])
+        if not valid:
+            raise ValueError(u'Invalid job restriction: job={}'.format(job))
+        job.enable(job_args.get('enable', True))
+
+    print '\n'.join(['{}'.format(repr(job)) for job in cron.crons])
+    print '-' * 40, '[cron.crons]'
+    cron.write()
+    os.system('crontab -l')
+    print '=' * 60, '[crontab -l]'
 
 
 def config(args):
@@ -64,16 +114,18 @@ def config(args):
     base_args = config.get('args', {})
     root_path = config_global.get('root')
     if not root_path:
-        root_path = os.path.split(os.path.dirname(os.path.abspath(__file__)))[0]
+        root_path = os.path.dirname(os.path.abspath(__file__))
     tmpl_type = config_global.get('template-type', 'jinja2')
     renderer = Renderer(tmpl_type, root_path)
     print '[Root path] = {}'.format(root_path)
     print '-' * 40
 
-    for file_item in config['files']:
+    setup_crontab(root_path, config)
+
+    # Render the config files
+    for target_path, file_args in config['files'].iteritems():
         the_args = copy.copy(base_args)
-        tmpl_path = file_item.get('tmpl')
-        target_path = file_item.get('target')
+        tmpl_path = file_args.get('tmpl')
         if not target_path:
             target_path = tmpl_path.rsplit('.', 1)[0]
         if not tmpl_path:
@@ -84,7 +136,7 @@ def config(args):
 
         target_path = os.path.join(root_path, target_path)
         print 'Rendering... => {}'.format(tmpl_path),
-        the_args.update(file_item['args'])
+        the_args.update(file_args)
         content = renderer.render(tmpl_path, the_args)
         print ' ~ [Render ok]'
         if not args.dry:

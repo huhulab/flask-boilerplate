@@ -27,11 +27,8 @@ frontend/node_modules
 
 # Config files
 deploy/config.toml
-deploy/supervisor/supervisord.conf
-deploy/supervisor/programs/app.conf
-deploy/nginx/apiapp.conf
-deploy/nginx/webapp.conf
-deploy/nginx/dl.conf
-deploy/nginx/frontend.conf
-deploy/apps/apiapp.py
-deploy/apps/webapp.yaml
+deploy/supervisor/*.conf
+deploy/supervisor/programs/*.conf
+deploy/nginx/*.conf
+deploy/apps/*.py
+deploy/apps/*.yaml

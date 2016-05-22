@@ -1,0 +1,197 @@
+
+# 全局配置
+[global]
+template-type = "jinja2"        # Current only support jinja2
+root = "{{ project_root }}"
+project-name = "jcyx2"
+
+# 默认参数
+[args]
+user = "xxx"
+listen = 80
+debug = true
+####################
+# Supervisor
+####################
+numprocs = 1
+stopsignal = "TERM"
+env = '''__x="0"'''
+####################
+# Flask
+####################
+sqlalchemy_echo = false
+sqlalchemy_database_uri = "postgresql://huhu:public@localhost:5432/jcyx2"
+log_level = "DEBUG"
+# Mail
+mail_from = "work@huhulab.com"
+mail_to_default = "xxx@gmail.com"
+mail_passwd = "************"
+notify_receiver = "xxx@gmail.com"
+# Cache
+cache_redis_host = "127.0.0.1"
+cache_redis_port = 6379
+cache_redis_db = 10
+# mq
+mq_host = "127.0.0.1"
+mq_port = 5672
+mq_user = "huhu"
+mq_passwd = "**********"
+producer_serializer = "json"
+exchange_name = "amq.direct"
+exchange_type = "direct"
+
+# Crontab jobs
+############################################################
+# [restriction]: m h dom mon dow user  command
+[[jobs]]
+# 生成报表数据
+name = "make-reports"
+is-abspath = true
+enable = true                    # Default: true
+restriction = "@daily"
+executable = "{{ python_path }} {{ project_root }}/server/manager.py"
+args = "preprocess_log -l {{ project_logs }} -c  {{ project_cache }} -r true >> {{ project_logs }}/make-reports.log"
+
+[[jobs]]
+# 将报表数据入账
+name = "record-report"
+is-abspath = true
+enable = true
+restriction = "@daily"
+command = "{{ python_path }} {{ project_root }}/server/manager.py record_report >> {{ project_logs }}/record-report.log"
+
+[[jobs]]
+# 检查广告是否有效
+name = "check-advert-enables"
+enable = false
+is-abspath = true
+restriction = "* * * * *"
+command = "{{ python_path }} {{ project_root }}/server/manager.py check_advert_enables >> {{ project_logs }}/check-advert-enables.log"
+
+# Supervisor stuff
+############################################################
+[files."deploy/supervisor/supervisord.conf"]
+  directory = "{{ project_root }}/tmp/supervisor"
+  log_directory = "{{ project_root }}/tmp/supervisor"
+
+[files."deploy/supervisor/programs/apiapp.conf"]
+  program = "jcyx2-apiapp"
+  command = "gunicorn -c etc/gunicorn/apiapp.py apiapp:app"
+  directory = "{{ project_root }}/server"
+  logfile = "{{ project_logs }}/supervisor-apiapp.log"
+
+[files."deploy/supervisor/programs/webapp.conf"]
+  program = "jcyx2-webapp"
+  command = "gunicorn -c etc/gunicorn/webapp.py webapp:app"
+  directory = "{{ project_root }}/server"
+  logfile = "{{ project_logs }}/supervisor-webapp.log"
+
+[files."deploy/supervisor/programs/saver.conf"]
+  program = "jcyx2-saver"
+  command = "python -u workers/saver.py -b {{ project_root }}/server/tmp/log"
+  directory = "{{ project_root }}/server"
+  stopsignal = "INT"
+  logfile = "{{ project_logs }}/supervisor-saver.log"
+
+
+# Nginx stuff
+############################################################
+[files."deploy/nginx/apiapp.conf"]
+  name = "jcyx2_apiapp"
+  keepalive_timeout = 8
+  servers = [
+    "127.0.0.1:4004 weight=4 max_fails=2 fail_timeout=10s"
+  ]
+  listen = 4100
+  server_name = "deb.vm:4100"              # jcyx2-api.huhulab.com
+  ssl = "off"
+
+[files."deploy/nginx/webapp.conf"]
+  listen = 4102
+  server_name = "deb.vm:4102"   # jcyx2-web.huhulab.com
+  proxy_pass = "http://127.0.0.1:4005"
+  frontend_root = "{{ project_root }}/frontend"
+  ssl = "off"
+
+[files."deploy/nginx/dl.conf"]
+  listen = 4104
+  server_name = "{{ download_host }}"   # jcyx2-dl.huhulab.com
+  root = "{{ upload_dir }}"
+  ssl = "off"
+
+
+# Web Application stuff
+############################################################
+[files."server/etc/gunicorn/apiapp.py"]
+  app = "jcyx2-apiapp"
+  bind = "0.0.0.0:4004"
+  loglevel = "info"
+  log_dir = "{{ project_logs }}"
+  debug = false
+  group = false
+  backlog = 2048
+  worker_class = "gevent"
+  worker_connections = 1000
+  timeout = 30
+  keepalive = 2
+  deamon = false
+  pidfile = "None"
+  accesslog = "/dev/null"
+
+[files."server/etc/gunicorn/webapp.py"]
+  app = "jcyx2-webapp"
+  bind = "0.0.0.0:4005"
+  loglevel = "info"
+  log_dir = "{{ project_logs }}"
+  debug = false
+  group = false
+  backlog = 2048
+  worker_class = "sync"
+  worker_connections = 10
+  timeout = 30
+  keepalive = 2
+  deamon = false
+  pidfile = "None"
+  accesslog = "/dev/null"
+
+# [files."deploy/apps/webapp.yaml"]
+#   bind = "0.0.0.0:3200"
+#   processes = 4
+#   master = true
+#   wsgi = "webapp:app"
+#   logto = "/mnt/jcyx2/log/uwsgi-webapp.log"
+
+
+############################################################
+[files."server/etc/apiapp.py"]
+  secret_key = "api-xxxxxxx"
+  log_file = "{{ project_logs }}/apiapp-flask.log"
+  notify_project = "jcyx2-apiapp"
+  # MQ
+  events_routing_key = "test.jcyx2.mobile.events"
+  download_url_tmpl = "http://{{ download_host }}/{path:s}"
+  # Statsd
+  statsd_host = "localhost"
+  statsd_port = 8125
+  statsd_prefix = "jcyx2-api"
+
+[files."server/etc/webapp.py"]
+  secret_key = "web-yyyyyyy"
+  log_file = "{{ project_logs }}/webapp-flask.log"
+  notify_project = "jcyx2-webapp"
+  # others
+  upload_dir = "{{ upload_dir }}"
+  download_url_tmpl = "http://{{ download_host }}/{path:s}"
+  advert_icon_dimensions = "512,512"
+  advert_banner_dimensions = "720,136"
+  advert_inject_dimensions = "800,600"
+  advert_exit_popup_dimensions = "580,200"
+  default_perpage = 20
+  max_session_days = 60
+  # Statsd
+  statsd_host = "localhost"
+  statsd_port = 8125
+  statsd_prefix = "jcyx2-web"
+
+[files."frontend/static/config.js"]
+  api_url = "http://{{ api_host }}"
